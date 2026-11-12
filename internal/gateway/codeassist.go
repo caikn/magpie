@@ -428,6 +428,11 @@ func buildCodeAssistSent(r *Request, sent, agent string) []byte {
 					}
 					parts = append(parts, part)
 				}
+			case Thinking:
+				// Replay only Gemini's signed native thought parts in its tool history.
+				if !claude && p.SignedBy == "gemini" && p.Signature != "" {
+					parts = append(parts, map[string]any{"text": p.Text, "thought": true, "thoughtSignature": p.Signature})
+				}
 			case Image, File:
 				if p.Data != "" {
 					parts = append(parts, geminiInline(p.MediaType, p.Data))
@@ -468,8 +473,8 @@ func buildCodeAssistSent(r *Request, sent, agent string) []byte {
 					res["id"] = id
 				}
 				parts = append(parts, map[string]any{"functionResponse": res})
-				// the images a tool returned follow its response, as Gemini
-				// CLI sends a file it read. Antigravity hands a Claude model
+				// Native Gemini 3+ puts images inside the response; legacy
+				// requests use adjacent parts. Antigravity hands a Claude model
 				// the turn back as Anthropic blocks, where an image between
 				// two responses splits them from their calls ("tool_use ids
 				// were found without tool_result blocks immediately after"):
@@ -483,7 +488,11 @@ func buildCodeAssistSent(r *Request, sent, agent string) []byte {
 						ims = append(ims, map[string]any{"fileData": map[string]any{"mimeType": im.MediaType, "fileUri": im.URL}})
 					}
 				}
-				if ag && claude && len(ims) > 0 {
+				if !ag && !claude && geminiGeneration(sent) >= 3 && len(ims) > 0 {
+					// Native Gemini 3+ images belong to their function response,
+					// not sibling parts that change the response turn's shape.
+					res["parts"] = ims
+				} else if ag && claude && len(ims) > 0 {
 					label := fmt.Sprintf("Image returned by tool %s (call %s):", name, toolID(p.CallID))
 					if len(ims) > 1 {
 						label = fmt.Sprintf("%d images returned by tool %s (call %s):", len(ims), name, toolID(p.CallID))
@@ -497,8 +506,7 @@ func buildCodeAssistSent(r *Request, sent, agent string) []byte {
 					}
 				}
 			}
-			// thinking isn't sent back: its signatures belong to whoever
-			// made them, and Google turns away ones it didn't
+			// Unsigned thinking and another API's signatures are not replayed.
 		}
 		if len(after) > 0 {
 			// the responses lead the turn, as an Anthropic tool_result
@@ -1492,11 +1500,12 @@ func (d *codeAssistDecoder) decode(data string, emit func(Event)) error {
 				emit(Event{Kind: KToolArgs, Text: string(args)})
 			case p.Thought:
 				d.flush(emit)
-				if p.Text != "" {
-					emit(Event{Kind: KThink, Text: p.Text})
-				}
-				if p.Signature != "" {
-					emit(Event{Kind: KSig, Text: p.Signature})
+				if p.Text != "" || p.Signature != "" {
+					emit(Event{Kind: KThink, Text: p.Text, Signature: p.Signature, Name: "gemini"})
+					if p.Signature != "" {
+						// Other client encoders still consume the signature delta.
+						emit(Event{Kind: KSig, Text: p.Signature, Signature: p.Signature, Name: "gemini"})
+					}
 				}
 			case p.InlineData != nil && p.InlineData.Data != "":
 				// a picture an image model drew (gemini-*-image): its
@@ -1505,11 +1514,12 @@ func (d *codeAssistDecoder) decode(data string, emit func(Event)) error {
 				d.flush(emit)
 				emit(Event{Kind: KImage, Name: p.InlineData.MimeType, Text: p.InlineData.Data})
 			case p.Text != "" || p.Signature != "":
-				d.text(p.Text, emit)
 				if p.Signature != "" {
-					// Gemini's signature on its text, after it (#1445)
+					// Splitting signed text changes the model part replayed after a tool.
 					d.flush(emit)
-					emit(Event{Kind: KTextSig, Text: p.Signature})
+					emit(Event{Kind: KText, Text: p.Text, Signature: p.Signature})
+				} else {
+					d.text(p.Text, emit)
 				}
 			}
 		}

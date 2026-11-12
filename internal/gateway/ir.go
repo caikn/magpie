@@ -458,11 +458,13 @@ type Event struct {
 	Kind   EventKind
 	Status int // upstream HTTP status for KError, when known
 	Text   string
-	ID     string
-	Name   string
-	MsgID  string
-	Model  string
-	Stop   string // stop | length | tool | filter
+	// Signature is attached to this native Gemini text/thought part, not a later delta.
+	Signature string
+	ID        string
+	Name      string
+	MsgID     string
+	Model     string
+	Stop      string // stop | length | tool | filter
 	// Code: for KError, the source error or safety-filter code (rate_limit,
 	// server_error, bio_policy, content_filter…); RequestID: the vendor's id for the
 	// request the event is of, when it is known by then
@@ -722,27 +724,29 @@ func (c *collector) add(ev Event) {
 		c.res.ID, c.res.Model = ev.MsgID, ev.Model
 		c.res.Usage.add(ev.Usage)
 	case KText:
-		if p := c.last(Text); p != nil {
+		if p := c.last(Text); p != nil && p.Signature == "" && ev.Signature == "" {
 			c.grow(len(c.res.Parts)-1, ev.Text)
 		} else {
 			c.closeTool()
-			c.res.Parts = append(c.res.Parts, Part{Kind: Text, Text: ev.Text})
+			c.res.Parts = append(c.res.Parts, Part{Kind: Text, Text: ev.Text, Signature: ev.Signature})
 		}
 	case KThinkStart:
 		c.fresh = true
 		return
 	case KThink:
-		if p := c.open(); p != nil {
+		if p := c.open(); p != nil && p.Signature == "" && ev.Signature == "" {
 			c.grow(len(c.res.Parts)-1, ev.Text)
 		} else {
 			c.closeTool()
-			c.res.Parts = append(c.res.Parts, Part{Kind: Thinking, Text: ev.Text})
+			c.res.Parts = append(c.res.Parts, Part{Kind: Thinking, Text: ev.Text, Signature: ev.Signature, SignedBy: ev.Name})
 		}
 	case KSig:
 		// a block signed with no text in it (Claude's thinking when its
 		// display is omitted) is a block all the same (#1445)
 		if p := c.open(); p != nil {
-			p.Signature += ev.Text
+			if ev.Signature == "" || p.Signature != ev.Signature {
+				p.Signature += ev.Text
+			}
 			if ev.Name != "" {
 				p.SignedBy = ev.Name
 			}

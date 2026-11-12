@@ -249,19 +249,18 @@ func TestGeminiToolResponseTurnHoldsNoText(t *testing.T) {
 			continue
 		}
 		tools, said := q.Contents[2], q.Contents[3]
-		if name == "vertex" {
-			// Vertex AI takes no image in a response turn: it goes with
-			// what the user said, in the turn after
-			if len(tools.Parts) != 2 || tools.Parts[0]["functionResponse"] == nil || tools.Parts[1]["functionResponse"] == nil {
-				t.Errorf("vertex: the tools' turn is %v", tools)
+		if name == "code assist antigravity" {
+			if tools.Role != "user" || len(tools.Parts) != 3 || tools.Parts[0]["functionResponse"] == nil || tools.Parts[1]["inlineData"] == nil || tools.Parts[2]["functionResponse"] == nil {
+				t.Errorf("%s: the legacy tools' turn is %v", name, tools)
 			}
-			if said.Role != "user" || len(said.Parts) != 2 || said.Parts[0]["inlineData"] == nil || said.Parts[1]["text"] != codexCompactPrompt {
-				t.Errorf("vertex: the user's turn after it is %v", said)
+		} else if tools.Role != "user" || len(tools.Parts) != 2 || tools.Parts[0]["functionResponse"] == nil || tools.Parts[1]["functionResponse"] == nil {
+			t.Errorf("%s: the native tools' turn is %v", name, tools)
+		} else {
+			response := tools.Parts[0]["functionResponse"].(map[string]any)
+			images, _ := response["parts"].([]any)
+			if len(images) != 1 || images[0].(map[string]any)["inlineData"] == nil {
+				t.Errorf("%s: the native result lost its image: %v", name, response)
 			}
-			continue
-		}
-		if tools.Role != "user" || len(tools.Parts) != 3 || tools.Parts[0]["functionResponse"] == nil || tools.Parts[1]["inlineData"] == nil || tools.Parts[2]["functionResponse"] == nil {
-			t.Errorf("%s: the tools' turn is %v", name, tools)
 		}
 		if said.Role != "user" || len(said.Parts) != 1 || said.Parts[0]["text"] != codexCompactPrompt {
 			t.Errorf("%s: the user's turn after it is %v", name, said)

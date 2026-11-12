@@ -754,6 +754,12 @@ type textCallSee struct {
 }
 
 func (t *textCallSee) event(ev Event) {
+	// A signed native Gemini part cannot be rewritten as a text-encoded call.
+	if ev.Kind == KText && ev.Signature != "" {
+		t.release()
+		t.see(ev)
+		return
+	}
 	switch ev.Kind {
 	case KText:
 		s := t.pending + ev.Text

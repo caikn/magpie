@@ -423,7 +423,7 @@ func signReply(data []byte, by string) ([]byte, bool) {
 // provider's signature; a text part's signature only helps, and goes.
 
 // signersNoted is dec with each signature in its events noted as provider
-// by's: a tool call's, which rides in its id (signedID), and a text's.
+// by's: a tool call's, which rides in its id (signedID), or native text/thought.
 func signersNoted(dec func(string, func(Event)) error, by string) func(string, func(Event)) error {
 	return func(data string, emit func(Event)) error {
 		return dec(data, func(ev Event) {
@@ -434,6 +434,10 @@ func signersNoted(dec func(string, func(Event)) error, by string) func(string, f
 				}
 			case KTextSig:
 				noteSigner(ev.Text, by)
+			case KText, KThink:
+				if ev.Signature != "" {
+					noteSigner(ev.Signature, by)
+				}
 			}
 			emit(ev)
 		})
@@ -441,21 +445,21 @@ func signersNoted(dec func(string, func(Event)) error, by string) func(string, f
 }
 
 // ownSignatures is req for provider by with no signature another provider
-// gave on its calls and texts (foreignSignature). Messages are copied
+// gave on its calls, texts and native thoughts (foreignSignature). Messages are copied
 // before they change.
 func ownSignatures(req *Request, by string) *Request {
 	return dropSignatures(req, func(sig string) bool { return foreignSignature(sig, by) })
 }
 
 // dropSignatures is req with the Gemini signatures drop says on its calls
-// and texts taken off. Claude's signed thinking is no Gemini signature,
+// texts and native thoughts taken off. Claude's signed thinking is no Gemini signature,
 // and stays.
 func dropSignatures(req *Request, drop func(sig string) bool) *Request {
 	var msgs []Message
 	for i, m := range req.Messages {
 		var parts []Part
 		for j, p := range m.Parts {
-			if (p.Kind != ToolCall && p.Kind != Text) || p.Signature == "" || !drop(p.Signature) {
+			if (p.Kind != ToolCall && p.Kind != Text && !(p.Kind == Thinking && p.SignedBy == "gemini")) || p.Signature == "" || !drop(p.Signature) {
 				continue
 			}
 			if parts == nil {
