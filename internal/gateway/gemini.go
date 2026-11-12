@@ -383,7 +383,7 @@ func parseGemini(body []byte) (*Request, error) {
 					msg.Parts = append(msg.Parts, Part{Kind: File, MediaType: p.FileData.MimeType, URL: p.FileData.FileURI})
 				}
 			case p.Thought:
-				msg.Parts = append(msg.Parts, Part{Kind: Thinking, Text: p.Text, Signature: p.Signature})
+				msg.Parts = append(msg.Parts, Part{Kind: Thinking, Text: p.Text, Signature: p.Signature, SignedBy: "gemini"})
 			case p.Text != "" || p.Signature != "":
 				msg.Parts = append(msg.Parts, Part{Kind: Text, Text: p.Text, Signature: p.Signature})
 			}
@@ -643,8 +643,12 @@ func geminiParts(parts []Part) []map[string]any {
 				out = append(out, part)
 			}
 		case Thinking:
-			if p.Text != "" {
-				out = append(out, map[string]any{"text": p.Text, "thought": true})
+			if p.Text != "" || p.Signature != "" {
+				part := map[string]any{"text": p.Text, "thought": true}
+				if p.SignedBy == "gemini" && p.Signature != "" {
+					part["thoughtSignature"] = p.Signature
+				}
+				out = append(out, part)
 			}
 		case Image:
 			if p.Data != "" {
@@ -735,10 +739,10 @@ func (e *geminiEncoder) event(ev Event) {
 		e.start(ev)
 	case KText:
 		e.flushTool()
-		e.chunk(geminiParts([]Part{{Kind: Text, Text: ev.Text}}), "", nil)
+		e.chunk(geminiParts([]Part{{Kind: Text, Text: ev.Text, Signature: ev.Signature}}), "", nil)
 	case KThink:
 		e.flushTool()
-		e.chunk(geminiParts([]Part{{Kind: Thinking, Text: ev.Text}}), "", nil)
+		e.chunk(geminiParts([]Part{{Kind: Thinking, Text: ev.Text, Signature: ev.Signature, SignedBy: ev.Name}}), "", nil)
 	case KTextSig:
 		// Gemini's signature on its text, as Gemini streams it (#1445)
 		e.flushTool()
